@@ -1,0 +1,141 @@
+                      +------------------------+
+                      |          CS 450        |
+                      | PROJECT 1: ALARM CLOCK |
+                      |     DESIGN DOCUMENT    |
+                      +------------------------+
+                   
+---- GROUP ----
+ 
+>> Fill in the names and email addresses of your group members.
+ 
+Gabriel Doon doongs@dukes.jmu.edu
+Ryan Gross grossrd@dukes.jmu.edu
+Sydney May may4sa@dukes.jmu.edu
+Katherine Shepherd shephekl@dukes.jmu.edu
+ 
+---- PRELIMINARIES ----
+ 
+>> If you have any preliminary comments on your submission or notes for 
+>> me, please give them here.
+ 
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+ 
+"Version Control with Subversion" - Ben Collins-Sussman, Brian W. Fitzpatrick & C. Michael Pilato
+https://svnbook.red-bean.com/
+
+                            ALARM CLOCK
+                            ===========
+ 
+---- DATA STRUCTURES ----
+ 
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+---- thread.h ----
+
+> enum thread_status
+    + int64_t wake_tick;
+        Tick that the timer is on when the thread is awakened. Used to gauge
+        if a thread has slept long enough to be awoken by timer_interrupt.
+
++ struct list_elem sleep_elem;
+    Element of the sleep_list. Used for the list_entry macro in
+    thread_sleep to iterate through the sleep_list.
+
++ struct semaphore sleep_semaphore;
+    Used to synchronize access to sleep_list during calls to
+    Thread_sleep. Prevents race conditions (see A4 in ‘Algorithms’
+    section).
+
++ void thread_sleep (int64_t);
+    See the description under thread_sleep in the thread.c section.
+
++ void thread_interrupt(void);
+    See the description under thread_interrupt in the thread.c section.
+
++ bool thread_sleep_less(const struct list_elem *a, const struct list_elem *b, void *aux);
+    See the description under thread_sleep_less in the thread.c section.
+
+---- thread.c ----
+
++ void thread_sleep (int64_t ticks);
+    Inserts the current thread into the sleep_list and updates the wake_tick passed from timer_sleep.
+    
++ void thread_interrupt();
+    Iterates through sleep_list and checks if the threads’ wake_ticks are less than the elapsed ticks. 
+    If so, it removes the thread from the sleep list.
+
++ bool thread_sleep_less (const struct list_elem *a, const struct list_elem *b, void *aux);
+    Comparator for threads based on their wake_tick field. Used for insertion to the sleep list.
+
++ static struct list sleep_list;
+    List of current sleeping threads. See thread_sleep for info on 
+    Populating this data structure.
+
+---- timer.c ----
+                            
++ void timer_sleep (int64_t ticks);
+    Initializes the first wake tick as ticks - 1 more than the current ticks. 
+    Calls thread_sleep with the computed wake_tick.
+ 
+---- ALGORITHMS ----
+ 
+>> A2: Briefly describe what happens in a call to timer_sleep(),
+>> including the effects of the timer interrupt handler.
+ 
+Timer_sleep makes a call to thread_sleep which, if the thread is not idle, removes the thread from its current list (the ready_list) and adds the thread to the sleep_list. 
+Then a new thread is scheduled. 
+The timer interrupt handler increments the current tick count and then calls our thread_interrupt function. 
+thread_interrupt will search the sleep list for threads that can be awoken, and then calls sema_up to allow for entry into the critical section.
+The timer interrupt then passes back control.
+ 
+>> A3: What steps are taken to minimize the amount of time spent in
+>> the timer interrupt handler?
+ 
+The timer interrupt invokes our thread_interrupt which is only responsible for checking the sleep list for threads that can be awoken.
+The sleep list is maintained as sorted, using the list_insert_ordered function provided by list.h. 
+This allows us to achieve O(n) in the worst cast (every thread waking), O(1) in the best case (no threads waking), and O(n/2 + 1) for the average case (half of the threads waking).
+See below in A6.
+
+---- SYNCHRONIZATION ----
+ 
+>> A4: How are race conditions avoided when multiple threads call
+>> timer_sleep() simultaneously? 
+ 
+Race conditions are avoided when multiple threads call timer_sleep(), by using semaphores. 
+The critical section of code involves the removal of threads ready to be awoken; thus, only one thread should be able to access this to avoid the reader-writer problem.
+By using sema_down, which puts a thread into the blocked state as well as keep threads about to be put to sleep out of the critical section after inserting to the sleep list.
+This makes it so when multiple threads call timer_sleep simultaneously one will be let into the critical section, and others will be waiting for permission to proceed.
+ 
+Race conditions are avoided when multiple threads call timer_sleep(), by using semaphores.
+By using sema_down, which puts a thread into the blocked state as well as keep threads about to be put to sleep out of the critical section that is just after insertion of a blocked thread.
+This makes it so when multiple threads call timer_sleep simultaneously one will be let into the critical section, and others will be waiting for permission to proceed.
+
+ 
+>> A5: How are race conditions avoided when a timer interrupt occurs
+>> during a call to timer_sleep()? 
+ 
+In our implementation, timer_sleep() calls thread_sleep() almost immediately. 
+Interrupts are turned off at the start of thread_sleep() to account for interrupts that may occur once the semaphore is implemented. 
+From there, the semaphore should handle blocking access to the critical section of list removal where needed.
+ 
+ 
+---- RATIONALE ----
+ 
+>> A6: Why did you choose this design?  In what ways is it superior to
+>> another design you considered?
+
+Our first design focused on simplicity and ease of implementation to allow us to pass tests before attempting to improve efficiency. 
+The design simply pushed sleeping threads to the end of our sleep list. 
+This resulted in a constant O(n) search through the linked list to find threads that were ready to wake.
+This initial design also added a THREAD_SLEEP state to thread.h, and this resulted in a lenghtier process to put threads to sleep and wake them up.
+ 
+We improved this design by using list_insert_ordered and the thread_sleep_less comparator to maintain a sorted sleep list.
+In doing this, the OS only has to check the first element in the list (continuing to traverse if the first element is ready to be unblocked).
+The worst case for searching the list will still be O(n); however, the average case will be O(n/2 + 1) for the average case as the search can be broken out of once the first non-ready thread is found.
+The best case for this search, when no threads are ready to wake, has improved from O(n) to O(1) as only the first thread needs to be checked. 
+For waking threads, the best case will be far more common than the worst case, and such this design improvement results in a greater improvement over repeated managements of threads.
+We also utilized the semaphores and THREAD_BLOCKED state provided by Pintos to streamline our process of putting threads to sleep and waking them.
